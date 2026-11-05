@@ -56,3 +56,7 @@ through the guest's exit code.
 - When something is stuck, take a `screenshot` before anything else. A modal dialog (UAC,
   SmartScreen, "How do you want to open this?") is the usual cause, and `ui snapshot -i` usually
   shows it.
+
+## Recording a video
+
+`agent-vm record demo.mp4 --seconds 30` captures the screen (about 10 fps) with what the guest's microphone hears as the soundtrack (`--audio speaker` for what it plays, `--audio none` for silence). Run it in the background and drive the VM meanwhile; other commands keep working while it records. Stop early with SIGINT/SIGTERM.

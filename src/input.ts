@@ -46,6 +46,9 @@ const PLAIN: Record<string, string> = {
   '/': 'slash',
 };
 const KEY_ALIASES: Record<string, string> = {
+  plus: 'equal',
+  equal: 'equal',
+  minus: 'minus',
   enter: 'ret',
   return: 'ret',
   esc: 'esc',

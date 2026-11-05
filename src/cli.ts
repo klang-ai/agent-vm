@@ -6,6 +6,7 @@ import { basename, resolve } from 'node:path';
 import { fileLevel, playIntoMic, recordSpeaker, sayIntoMic } from './audio.js';
 import { doctor } from './doctor.js';
 import { desktopExec, pull, push, sshExec, sshShell } from './guest.js';
+import { recordScreen, type RecordOptions } from './record.js';
 import { click, keysDown, keysUp, parseCombo, pressKeys, screenSize, screenshot, typeText } from './input.js';
 import { isRunning } from './qemu.js';
 import { withQmp } from './qmp.js';
@@ -387,6 +388,40 @@ program
     const out = resolve(file);
     const size = await withQmp(vmPaths(vm.name).qmp, (q) => screenshot(q, out));
     print({ file: out, ...size }, out);
+  });
+
+program
+  .command('record')
+  .description('Record the screen to an MP4, with the microphone or speaker audio')
+  .addHelpText(
+    'after',
+    examples(
+      'record demo.mp4 --seconds 20',
+      'record demo.mp4 --seconds 60 --audio speaker &   # stop early with: kill -INT $!',
+    ),
+  )
+  .argument('[file]', 'output MP4', 'recording.mp4')
+  .option('--seconds <n>', 'stop after this long (or on Ctrl+C / SIGTERM)', Number, 30)
+  .option('--fps <n>', 'frames per second to capture', Number, 10)
+  .option('--audio <source>', 'soundtrack: mic (what Windows hears), speaker, or none', 'mic')
+  .option('--width <px>', 'video width', Number, 1280)
+  .action(async (file: string, opts: { seconds: number; fps: number; audio: string; width: number }) => {
+    if (!['mic', 'speaker', 'none'].includes(opts.audio)) {
+      program.error('error: --audio must be mic, speaker or none', { exitCode: 2 });
+    }
+    const vm = runningVm();
+    const out = resolve(file);
+    let stop = false;
+    const onSignal = () => (stop = true);
+    process.on('SIGINT', onSignal).on('SIGTERM', onSignal);
+    const result = await recordScreen(
+      vmPaths(vm.name).qmp,
+      vm.name,
+      out,
+      { ...opts, audio: opts.audio as RecordOptions['audio'] },
+      () => stop,
+    );
+    print({ file: out, ...result }, `${out} (${result.seconds.toFixed(1)} s, ${result.frames} frames)`);
   });
 
 program
