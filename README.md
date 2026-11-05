@@ -278,13 +278,37 @@ explicit Hyper-V enlightenments instead of `hv-passthrough`, and the UEFI variab
 
 ## Using it from an agent
 
-The package ships a skill for coding agents at
-[`skills/agent-vm/SKILL.md`](skills/agent-vm/SKILL.md). It covers the observe → act → verify
-loop, which channel to use for what, and the gotchas. For Claude Code:
+agent-vm is built to be driven by coding agents such as Claude Code and Codex:
+
+- `agent-vm --help` opens with where to start, groups the commands, and lists the environment
+  variables and exit codes. Every command's `--help` ends with examples.
+- `--json` makes every command machine-readable, errors included:
+  `{"error": {"reason": "failed", "message": "…", "hint": "…"}}` on stdout, exit 1 (or 2 for
+  usage errors). Errors come with a hint naming the next command to run.
+- The package ships a skill, version-matched to the CLI. It covers the observe → act → verify
+  loop, which channel to use for what, and the gotchas. `agent-vm skills get` prints it.
+
+Install the skill where your agent looks for it:
 
 ```sh
-mkdir -p ~/.claude/skills && ln -s "$(npm root -g)/@klang-ai/agent-vm/skills/agent-vm" ~/.claude/skills/agent-vm
+agent-vm skills install                       # ~/.claude/skills and ~/.codex/skills
+agent-vm skills install --codex               # only Codex ($CODEX_HOME/skills)
+agent-vm skills install --project .           # .claude/skills and .agents/skills in a repo
 ```
+
+It copies the skill rather than linking it, so re-run it after upgrading agent-vm.
+
+**Codex sandbox.** agent-vm keeps its state in `~/.agent-vm` and reaches the guest over
+`127.0.0.1`, both of which Codex's default `workspace-write` sandbox blocks. Allow them in
+`~/.codex/config.toml`:
+
+```toml
+[sandbox_workspace_write]
+writable_roots = ["/home/you/.agent-vm"]
+network_access = true
+```
+
+or run Codex with `--sandbox danger-full-access` on a machine where that is acceptable.
 
 Rules of thumb for agents:
 

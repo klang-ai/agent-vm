@@ -42,8 +42,9 @@ export function isRunning(vm: VmConfig) {
   return qemuPid(vm) !== undefined;
 }
 
-// virtio-vga, not qxl: QEMU's screendump cannot see qxl's native mode, so host screenshots of
-// a running Windows desktop come out black.
+// Plain std VGA on purpose: Windows draws through the UEFI framebuffer and QEMU's screendump
+// always sees it. With qxl (native mode) or virtio-vga (no flush from the basic display
+// driver) host screenshots of a running Windows come out black.
 // Every device here must support live migration, because checkpoints are QEMU snapshots
 // (savevm): no invtsc or hv-passthrough, and the UEFI variable store is qcow2, not raw.
 export function qemuArgs(vm: VmConfig, { install }: { install: boolean }): string[] {
@@ -90,7 +91,7 @@ export function qemuArgs(vm: VmConfig, { install }: { install: boolean }): strin
     '-netdev',
     `user,id=net0,hostfwd=tcp:127.0.0.1:${vm.ports.ssh}-:22`,
     '-device',
-    `virtio-vga,xres=${vm.resolution.width},yres=${vm.resolution.height}`,
+    `VGA,xres=${vm.resolution.width},yres=${vm.resolution.height},vgamem_mb=64`,
     '-device',
     'qemu-xhci,id=xhci',
     '-device',

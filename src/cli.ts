@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { Command, Option } from 'commander';
+import { Command, CommanderError, Option } from 'commander';
 import { spawn } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { basename, resolve } from 'node:path';
@@ -11,6 +11,7 @@ import { isRunning } from './qemu.js';
 import { withQmp } from './qmp.js';
 import { listVms, loadVm, resolveVmName, vmPaths, type VmConfig } from './state.js';
 import { psQuote, UserError, which } from './util.js';
+import { installSkill, listSkills, readSkill, skillPath, type SkillTarget } from './skills.js';
 import * as vms from './vm.js';
 
 const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as {
@@ -22,8 +23,43 @@ const program = new Command()
   .description('Let AI agents drive a real Windows desktop in a local VM.')
   .version(pkg.version)
   .option('--vm <name>', 'VM to act on (default: $AGENT_VM, or the only VM)')
-  .option('--json', 'machine-readable output')
-  .showHelpAfterError();
+  .option('--json', 'machine-readable output (errors too: {"error": {...}} on stdout)')
+  .showHelpAfterError('(agent-vm --help lists commands; agent-vm <command> --help has examples)')
+  .exitOverride()
+  .addHelpText(
+    'before',
+    `Start here (for AI agents):
+  agent-vm skills get        the full guide, version-matched to this CLI
+  agent-vm doctor            is the host ready, is the VM healthy?
+`,
+  )
+  .addHelpText(
+    'after',
+    `
+Examples:
+  $ agent-vm create win11                       # once, ~30 min, unattended
+  $ agent-vm checkpoint restore clean           # known state in seconds
+  $ agent-vm exec 'Get-Process | Select -First 5'
+  $ agent-vm launch notepad.exe && agent-vm ui snapshot -i
+  $ agent-vm mic say "hello, this is a test"
+
+Environment:
+  AGENT_VM        VM to act on when --vm is not given
+  AGENT_VM_HOME   state directory (default: ~/.agent-vm)
+
+Exit codes:
+  0  success
+  1  agent-vm failed (message on stderr; with --json an error object on stdout)
+  2  bad arguments or usage
+  3  level: the WAV is silent
+  exec, ui, web and install-app pass through the exit code of what ran in the guest.
+
+Every command has --help with examples.`,
+  );
+
+function examples(...lines: string[]) {
+  return '\nExamples:\n' + lines.map((l) => `  $ agent-vm ${l}`).join('\n');
+}
 
 const opts = () => program.opts<{ vm?: string; json?: boolean }>();
 const currentVm = (): VmConfig => loadVm(resolveVmName(opts().vm));
@@ -62,9 +98,19 @@ interface CreateFlags {
 
 const psArgs = (args: string[]) => (args.length ? `@(${args.map(psQuote).join(',')})` : '@()');
 
+program.commandsGroup('Set up and run:');
+
 program
   .command('create')
   .description('Download Windows 11, install it unattended and bootstrap the agent tooling')
+  .addHelpText(
+    'after',
+    examples(
+      'create win11',
+      "create win11 --cpus 8 --memory 12 --time-zone 'W. Europe Standard Time'",
+      'create win11-de --locale de-DE --iso ~/Win11_de.iso',
+    ),
+  )
   .argument('[name]', 'VM name', 'win11')
   .option('--cpus <n>', 'virtual CPUs', (v) => Number(v), 4)
   .option('--memory <gb>', 'memory in GB', (v) => Number(v), 8)
@@ -104,6 +150,7 @@ program
 program
   .command('up')
   .description('Start the VM and wait until the desktop is ready')
+  .addHelpText('after', examples('up', 'up -c signed-in'))
   .option('-c, --checkpoint <name>', 'restore this checkpoint first')
   .action(async (o: { checkpoint?: string }) => {
     const vm = currentVm();
@@ -163,9 +210,20 @@ program
     spawn(viewer, args, { detached: true, stdio: 'ignore' }).unref();
   });
 
+program.commandsGroup('Run things in Windows:');
+
 program
   .command('exec')
   .description('Run PowerShell in the guest (SSH session, elevated). Use --desktop for the user session')
+  .addHelpText(
+    'after',
+    examples(
+      "exec 'Get-ComputerInfo | Select OsName, OsVersion'",
+      "exec 'Get-Content $env:LOCALAPPDATA/MyApp/log.txt -Tail 50'",
+      "exec --desktop 'Start-Process notepad'",
+      'exec --desktop --detach \'ffmpeg -y -f dshow -i audio="Microphone (High Definition Audio Device)" -t 8 C:/agent-vm/heard.wav\'',
+    ),
+  )
   .argument('<script...>', 'PowerShell to run; join words or pass one quoted string')
   .option('-d, --desktop', "run in the signed-in user's desktop session (visible windows, UI Automation)")
   .option('--detach', 'with --desktop: start it and return immediately')
@@ -187,6 +245,7 @@ program
 program
   .command('push')
   .description('Copy a file or directory into the guest')
+  .addHelpText('after', examples('push ./build/MyApp-setup.exe C:/Users/agent/Desktop/'))
   .argument('<local>')
   .argument('<remote>', 'e.g. C:/Users/agent/Desktop/')
   .action(async (local: string, remote: string) => push(runningVm(), local, remote));
@@ -194,6 +253,7 @@ program
 program
   .command('pull')
   .description('Copy a file or directory out of the guest')
+  .addHelpText('after', examples('pull C:/agent-vm/heard.wav ./heard.wav'))
   .argument('<remote>')
   .argument('<local>')
   .action(async (remote: string, local: string) => pull(runningVm(), remote, local));
@@ -201,6 +261,10 @@ program
 program
   .command('install-app')
   .description('Copy an installer (.exe/.msi) into the guest and run it silently as the desktop user')
+  .addHelpText(
+    'after',
+    examples('install-app ./MyApp_1.0.0_x64-setup.exe', "install-app ./MyApp.msi --args '/qn ALLUSERS=1'"),
+  )
   .argument('<installer>')
   .option('--args <args>', 'installer arguments (default: /S for .exe, /qn for .msi)')
   .action(async (installer: string, o: { args?: string }) => {
@@ -220,6 +284,14 @@ program
 program
   .command('launch')
   .description('Start a program in the desktop session')
+  .addHelpText(
+    'after',
+    examples(
+      'launch notepad.exe',
+      "launch 'C:/Users/agent/AppData/Local/MyApp/MyApp.exe' --cdp",
+      'launch myapp.exe -e RUST_LOG=debug -- --verbose',
+    ),
+  )
   .argument('<program>', 'path or name of the executable')
   .argument('[args...]')
   .option('--cdp [port]', 'expose WebView2/Chromium DevTools on this guest port (for `agent-vm web`)')
@@ -246,12 +318,25 @@ program
     print({ pid }, `started pid ${pid}`);
   });
 
+program.commandsGroup('See and operate the screen:');
+
 program
   .command('ui')
   .description(
     'Run agent-desktop (Windows UI Automation) in the desktop session: snapshot -i, click @e3, ...',
   )
-  .argument('<args...>', 'agent-desktop arguments; see `agent-vm ui --help-tool`')
+  .addHelpText(
+    'after',
+    examples(
+      'ui snapshot -i',
+      'ui click @e3',
+      'ui type @e5 "hello"',
+      'ui get text @e4',
+      'ui wait --window "Notepad"',
+      'ui skills get desktop      # the full agent-desktop guide',
+    ),
+  )
+  .argument('<args...>', "agent-desktop arguments (`agent-vm ui --help` is agent-desktop's own help)")
   .allowUnknownOption()
   .helpOption(false)
   .action(async (args: string[]) => {
@@ -271,6 +356,7 @@ program
 program
   .command('web')
   .description('Run agent-browser against DevTools in the guest (start the app with `launch --cdp`)')
+  .addHelpText('after', examples('web snapshot -i', 'web click @e2', "web eval 'document.title'"))
   .argument('<args...>', 'agent-browser arguments, e.g. snapshot -i')
   .allowUnknownOption()
   .helpOption(false)
@@ -290,6 +376,7 @@ program
 program
   .command('screenshot')
   .description('Capture the whole screen from the host (works even if the guest is wedged)')
+  .addHelpText('after', examples('screenshot', 'screenshot evidence/after-save.png'))
   .argument('[file]', 'output PNG', 'screenshot.png')
   .action(async (file: string) => {
     const vm = runningVm();
@@ -301,6 +388,7 @@ program
 program
   .command('key')
   .description('Press a key combo from the host, e.g. ctrl+alt+delete, win+r, enter')
+  .addHelpText('after', examples('key win+r', 'key ctrl+shift+space', 'key ctrl+a ctrl+c'))
   .argument('<combo...>')
   .action(async (combos: string[]) => {
     const vm = runningVm();
@@ -321,6 +409,7 @@ program
 program
   .command('click')
   .description('Click at screen pixel coordinates from the host')
+  .addHelpText('after', examples('click 960 540', 'click 100 200 --button right'))
   .argument('<x>', 'x pixel', Number)
   .argument('<y>', 'y pixel', Number)
   .addOption(new Option('--button <button>').choices(['left', 'right', 'middle']).default('left'))
@@ -331,9 +420,20 @@ program
     await withQmp(p.qmp, async (q) => click(q, x, y, await screenSize(q, p.dir), o));
   });
 
+program.commandsGroup('Checkpoints:');
+
 const checkpoint = program
   .command('checkpoint')
-  .description('Save and restore full VM state (memory + disk)');
+  .description('Save and restore full VM state (memory + disk)')
+  .addHelpText(
+    'after',
+    examples(
+      'checkpoint save app-installed',
+      'checkpoint restore clean',
+      'checkpoint list',
+      'checkpoint delete old',
+    ),
+  );
 checkpoint
   .command('save')
   .argument('<name>')
@@ -360,7 +460,19 @@ checkpoint
   .argument('<name>')
   .action(async (name: string) => vms.checkpointDelete(currentVm(), name));
 
-const mic = program.command('mic').description("Feed audio into the guest's microphone");
+program.commandsGroup('Audio:');
+
+const mic = program
+  .command('mic')
+  .description("Feed audio into the guest's microphone")
+  .addHelpText(
+    'after',
+    examples(
+      'mic say "hello, this is a test"',
+      'mic say --lang de "Guten Morgen"',
+      'mic play ./fixtures/meeting.wav',
+    ),
+  );
 mic
   .command('play')
   .description('Play an audio file into the microphone (wav/flac/ogg; others need ffmpeg)')
@@ -376,6 +488,7 @@ mic
 program
   .command('speaker')
   .description('Record what the guest plays on its speakers')
+  .addHelpText('after', examples('speaker out.wav -s 5 && agent-vm level out.wav'))
   .argument('<file>', 'output WAV')
   .option('-s, --seconds <n>', 'duration', (v) => Number(v), 5)
   .action(async (file: string, o: { seconds: number }) => {
@@ -390,6 +503,7 @@ program
 program
   .command('level')
   .description('Loudness of a 16-bit WAV file, to assert that audio was (not) captured')
+  .addHelpText('after', examples("level heard.wav || echo 'the guest heard nothing'"))
   .argument('<file>')
   .action((file: string) => {
     const level = fileLevel(resolve(file));
@@ -400,9 +514,12 @@ program
     if (level.silent) process.exitCode = 3;
   });
 
+program.commandsGroup('Local dev servers:');
+
 program
   .command('hosts')
   .description('Point host names at the host machine from inside the guest (e.g. local dev servers)')
+  .addHelpText('after', examples('hosts dev.app.example.test dev.api.example.test'))
   .argument('<names...>')
   .action(async (names: string[]) => {
     const vm = runningVm();
@@ -419,6 +536,7 @@ ipconfig /flushdns | Out-Null`;
 program
   .command('trust-ca')
   .description("Add a root CA certificate (PEM) to the guest's trusted roots, e.g. mkcert's")
+  .addHelpText('after', examples('trust-ca "$(mkcert -CAROOT)/rootCA.pem"'))
   .argument('<pem>')
   .action(async (pem: string) => {
     const vm = runningVm();
@@ -429,6 +547,55 @@ program
         `Import-Certificate -FilePath C:/agent-vm/ca.pem -CertStoreLocation Cert:/LocalMachine/Root | Out-Null`,
       ),
     );
+  });
+
+program.commandsGroup('Help:');
+program.helpCommand('help [command]', 'Show help and examples for a command');
+
+const skills = program
+  .command('skills')
+  .description('Print or install the agent skill (for Claude Code, Codex and other agents)')
+  .addHelpText(
+    'after',
+    examples(
+      'skills get                    # print the guide',
+      'skills install                # ~/.claude/skills and ~/.codex/skills',
+      'skills install --codex --project .   # .agents/skills in this repo',
+    ),
+  );
+skills
+  .command('list')
+  .description('List bundled skills')
+  .action(() => {
+    const names = listSkills();
+    print(names, names.join('\n'));
+  });
+skills
+  .command('get')
+  .description('Print a skill (default: agent-vm)')
+  .argument('[name]', 'skill name', 'agent-vm')
+  .action((name: string) => {
+    print({ name, content: readSkill(name) }, readSkill(name).trimEnd());
+  });
+skills
+  .command('path')
+  .description('Print the directory of a bundled skill')
+  .argument('[name]', 'skill name', 'agent-vm')
+  .action((name: string) => {
+    print({ path: skillPath(name) }, skillPath(name));
+  });
+skills
+  .command('install')
+  .description('Copy the skill where Claude Code and/or Codex will find it (re-run after upgrading)')
+  .option('--claude', 'only Claude Code')
+  .option('--codex', 'only Codex')
+  .option('--project <dir>', 'install into a project (.claude/skills, .agents/skills) instead of your home')
+  .action((o: { claude?: boolean; codex?: boolean; project?: string }) => {
+    const targets: SkillTarget[] = o.claude || o.codex ? [] : ['claude', 'codex'];
+    if (o.claude) targets.push('claude');
+    if (o.codex) targets.push('codex');
+    const installed = targets.map((target) => ({ target, path: installSkill(target, o.project) }));
+    print(installed, installed.map((i) => `${i.target}: ${i.path}`).join('\n'));
   });
 
 program
@@ -446,12 +613,23 @@ program
   });
 
 program.parseAsync().catch((error: unknown) => {
+  if (error instanceof CommanderError) {
+    // Commander has already printed the message (and help, for usage errors).
+    process.exitCode = error.exitCode === 0 ? 0 : 2;
+    if (opts().json && error.exitCode !== 0) {
+      print({ error: { reason: 'usage', message: error.message.replace(/^error: /, '') } });
+    }
+    return;
+  }
+  const message = error instanceof Error ? error.message : String(error);
+  const hint = error instanceof UserError ? error.hint : undefined;
+  if (opts().json) {
+    print({ error: { reason: error instanceof UserError ? 'failed' : 'internal', message, hint } });
+  }
   if (error instanceof UserError) {
-    process.stderr.write(`agent-vm: ${error.message}\n${error.hint ? `  ${error.hint}\n` : ''}`);
+    process.stderr.write(`agent-vm: ${message}\n${hint ? `  ${hint}\n` : ''}`);
   } else {
-    process.stderr.write(
-      `agent-vm: ${error instanceof Error ? (error.stack ?? error.message) : String(error)}\n`,
-    );
+    process.stderr.write(`agent-vm: ${error instanceof Error ? (error.stack ?? message) : message}\n`);
   }
   process.exitCode = 1;
 });

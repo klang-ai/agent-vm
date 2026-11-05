@@ -5,9 +5,11 @@ description: Drive a real Windows 11 desktop in a local QEMU/KVM VM with the age
 
 # agent-vm
 
-`agent-vm` gives you a Windows 11 machine you control from the Linux host. Run `agent-vm --help`
-and `agent-vm <command> --help` for flags. `agent-vm doctor` tells you whether the host and VM are
-healthy.
+`agent-vm` gives you a Windows 11 machine you control from the Linux host. `agent-vm <command>
+--help` has flags and examples. `agent-vm doctor` tells you whether the host and VM are healthy.
+Add `--json` when you parse output: errors then arrive as `{"error": {"message", "hint"}}` on
+stdout. Exit codes: 1 agent-vm failed, 2 usage error; `exec`, `ui`, `web` and `install-app` pass
+through the guest's exit code.
 
 ## The loop
 

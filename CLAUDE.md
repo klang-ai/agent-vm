@@ -1,4 +1,4 @@
-# agent-vm — notes for coding agents
+# agent-vm — notes for coding agents (AGENTS.md is a symlink to this file)
 
 - `npm run check` must pass before every commit: strict type-checked eslint, prettier, tsc and the
   unit tests (`src/test`, node:test). CI also runs PSScriptAnalyzer on `guest/` and gitleaks.

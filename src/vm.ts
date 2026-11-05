@@ -1,5 +1,13 @@
 import { randomBytes } from 'node:crypto';
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -28,16 +36,7 @@ export interface CreateOptions {
   tpm: boolean;
 }
 
-const WANTED_DRIVERS = [
-  'viostor',
-  'vioscsi',
-  'NetKVM',
-  'viogpudo',
-  'vioinput',
-  'vioserial',
-  'viorng',
-  'Balloon',
-];
+const WANTED_DRIVERS = ['viostor', 'vioscsi', 'NetKVM', 'vioinput', 'vioserial', 'viorng', 'Balloon'];
 
 async function driverPaths(virtioIso: string): Promise<string[]> {
   const { stdout } = await run(
@@ -121,16 +120,37 @@ function parseResolution(value: string) {
   return { width: Number(match[1]), height: Number(match[2]) };
 }
 
-// The Windows ISO's EFI loader waits for "press any key" before booting setup; keep pressing.
+// The Windows ISO's EFI loader waits for "press any key" before it boots Setup. Press Enter
+// only until the screen shows colour (the blue Windows logo): an Enter that reaches Setup
+// lands on its Cancel button and leaves the install waiting on "Are you sure you want to quit?".
 async function pressThroughBootPrompt(vm: VmConfig) {
-  const { qmp } = vmPaths(vm.name);
-  const until = Date.now() + 40_000;
-  await withQmp(qmp, async (q) => {
+  const p = vmPaths(vm.name);
+  const frame = join(p.dir, 'boot-prompt.ppm');
+  const until = Date.now() + 90_000;
+  await withQmp(p.qmp, async (q) => {
     while (Date.now() < until) {
+      await q.execute('screendump', { filename: frame }).catch(() => undefined);
+      if (existsSync(frame) && hasColour(readFileSync(frame))) break;
       await pressKeys(q, ['ret']).catch(() => undefined);
       await sleep(700);
     }
   });
+  rmSync(frame, { force: true });
+}
+
+// True when a binary PPM (P6, 8-bit) has a clearly saturated pixel. Firmware and boot-prompt
+// screens are grey text on black.
+export function hasColour(ppm: Buffer): boolean {
+  const header = /^P6\s+(\d+)\s+(\d+)\s+255\s/.exec(ppm.subarray(0, 64).toString('latin1'));
+  if (!header) return false;
+  const start = header[0].length;
+  for (let i = start; i + 2 < ppm.length; i += 3 * 7) {
+    const r = ppm[i]!,
+      g = ppm[i + 1]!,
+      b = ppm[i + 2]!;
+    if (Math.max(r, g, b) - Math.min(r, g, b) > 80) return true;
+  }
+  return false;
 }
 
 export async function create(opts: CreateOptions): Promise<VmConfig> {

@@ -84,3 +84,21 @@ describe('waitFor', () => {
     );
   });
 });
+
+describe('hasColour', () => {
+  // A black 64x64 frame, optionally with one pixel set.
+  const ppm = (pixel?: [number, number, number], at = 0) => {
+    const body = Buffer.alloc(64 * 64 * 3, 0);
+    if (pixel) {
+      body.set(pixel, at * 3);
+    }
+    return Buffer.concat([Buffer.from('P6\n64 64\n255\n'), body]);
+  };
+  it('sees the blue Windows logo but not grey firmware text', async () => {
+    const { hasColour } = await import('../vm.js');
+    assert.equal(hasColour(ppm()), false);
+    assert.equal(hasColour(ppm([200, 200, 200], 700)), false);
+    assert.equal(hasColour(ppm([0, 120, 215], 700)), true);
+    assert.equal(hasColour(Buffer.from('not a ppm')), false);
+  });
+});
