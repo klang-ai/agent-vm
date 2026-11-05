@@ -6,7 +6,7 @@ import { basename, resolve } from 'node:path';
 import { fileLevel, playIntoMic, recordSpeaker, sayIntoMic } from './audio.js';
 import { doctor } from './doctor.js';
 import { desktopExec, pull, push, sshExec, sshShell } from './guest.js';
-import { click, parseCombo, pressKeys, screenSize, screenshot, typeText } from './input.js';
+import { click, keysDown, keysUp, parseCombo, pressKeys, screenSize, screenshot, typeText } from './input.js';
 import { isRunning } from './qemu.js';
 import { withQmp } from './qmp.js';
 import { listVms, loadVm, resolveVmName, vmPaths, type VmConfig } from './state.js';
@@ -392,12 +392,35 @@ program
 program
   .command('key')
   .description('Press a key combo from the host, e.g. ctrl+alt+delete, win+r, enter')
-  .addHelpText('after', examples('key win+r', 'key ctrl+shift+space', 'key ctrl+a ctrl+c'))
+  .addHelpText(
+    'after',
+    examples(
+      'key win+r',
+      'key ctrl+a ctrl+c',
+      'key --hold 3000 ctrl+win            # hold-to-talk for 3 s',
+      'key --down ctrl+win && agent-vm mic say "hello" && agent-vm key --up ctrl+win',
+    ),
+  )
   .argument('<combo...>')
-  .action(async (combos: string[]) => {
+  .option('--hold <ms>', 'keep the keys pressed this long before releasing', Number)
+  .option('--down', 'press the keys and leave them held (release with --up)')
+  .option('--up', 'release keys held with --down')
+  .action(async (combos: string[], opts: { hold?: number; down?: boolean; up?: boolean }) => {
+    if ([opts.hold !== undefined, opts.down, opts.up].filter(Boolean).length > 1) {
+      program.error('error: use only one of --hold, --down and --up', { exitCode: 2 });
+    }
     const vm = runningVm();
     await withQmp(vmPaths(vm.name).qmp, async (q) => {
-      for (const combo of combos) await pressKeys(q, parseCombo(combo));
+      for (const combo of combos) {
+        const keys = parseCombo(combo);
+        if (opts.down) await keysDown(q, keys);
+        else if (opts.up) await keysUp(q, keys);
+        else if (opts.hold !== undefined) {
+          await keysDown(q, keys);
+          await new Promise((r) => setTimeout(r, opts.hold));
+          await keysUp(q, keys);
+        } else await pressKeys(q, keys);
+      }
     });
   });
 

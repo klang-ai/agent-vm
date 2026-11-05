@@ -99,10 +99,17 @@ const keyEvent = (key: string, down: boolean) => ({
   data: { down, key: { type: 'qcode', data: key } },
 });
 
+export async function keysDown(qmp: Qmp, keys: string[]) {
+  await qmp.execute('input-send-event', { events: keys.map((k) => keyEvent(k, true)) });
+}
+
+export async function keysUp(qmp: Qmp, keys: string[]) {
+  await qmp.execute('input-send-event', { events: [...keys].reverse().map((k) => keyEvent(k, false)) });
+}
+
 export async function pressKeys(qmp: Qmp, keys: string[]) {
-  await qmp.execute('input-send-event', {
-    events: [...keys.map((k) => keyEvent(k, true)), ...[...keys].reverse().map((k) => keyEvent(k, false))],
-  });
+  await keysDown(qmp, keys);
+  await keysUp(qmp, keys);
 }
 
 export async function typeText(qmp: Qmp, text: string, delayMs = 15) {
