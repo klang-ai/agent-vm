@@ -1,0 +1,69 @@
+{
+  "name": "@klang-ai/agent-vm",
+  "version": "0.1.0",
+  "description": "Let AI agents drive a real Windows desktop in a local VM: lifecycle, checkpoints, shell, UI automation, and a fake microphone.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "bin": {
+    "agent-vm": "dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "!dist/test",
+    "guest",
+    "skills",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc",
+    "prepare": "tsc",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "tsc && node --test --test-reporter=spec \"dist/test/*.test.js\"",
+    "check": "npm run lint && npm run format:check && npm run typecheck && npm test"
+  },
+  "dependencies": {
+    "commander": "^14.0.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.30.0",
+    "@types/node": "^24.0.0",
+    "eslint": "^9.30.0",
+    "prettier": "^3.6.0",
+    "typescript": "^5.9.0",
+    "typescript-eslint": "^8.35.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/klang-ai/agent-vm.git"
+  },
+  "homepage": "https://github.com/klang-ai/agent-vm#readme",
+  "bugs": {
+    "url": "https://github.com/klang-ai/agent-vm/issues"
+  },
+  "keywords": [
+    "ai-agents",
+    "windows",
+    "qemu",
+    "kvm",
+    "virtual-machine",
+    "computer-use",
+    "ui-automation",
+    "testing",
+    "microphone",
+    "claude-code"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "os": [
+    "linux"
+  ]
+}
