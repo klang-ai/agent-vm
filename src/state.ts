@@ -21,6 +21,10 @@ export interface VmConfig {
   ports: { ssh: number; spice: number; agentd: number; cdp: number };
   iso: string;
   installed: boolean;
+  /** What a base image saved from this VM would be keyed by; unset for TPM VMs. */
+  image?: { key: string; inputs: import('./images.js').ImageInputs };
+  /** Key of the base image this VM's disk is an overlay on. */
+  baseImage?: string;
 }
 
 export function vmDir(name: string) {

@@ -26,8 +26,8 @@ if ($virtio) {
 
 $msi = Get-ChildItem "$here\OpenSSH-Win64*.msi" | Select-Object -First 1
 Start-Process msiexec.exe -Wait -ArgumentList "/i `"$($msi.FullName)`" /qn /norestart"
-New-ItemProperty -Path HKLM:\SOFTWARE\OpenSSH -Name DefaultShell -PropertyType String -Force `
-  -Value "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" | Out-Null
+# sshd keeps its default shell (cmd.exe). agent-vm starts powershell itself; with PowerShell as
+# the default shell, exit codes and stderr would pass through two PowerShells and get mangled.
 
 # Members of Administrators only read administrators_authorized_keys, and sshd ignores it
 # unless SYSTEM and Administrators are the only principals with access.

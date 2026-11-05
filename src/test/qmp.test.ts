@@ -46,7 +46,11 @@ function fakeQga(path: string): Server {
         const msg = JSON.parse(buffer.slice(0, i)) as { execute: string; arguments?: { id?: number } };
         buffer = buffer.slice(i + 1);
         if (msg.execute === 'guest-sync-delimited') {
-          socket.write('\xff' + JSON.stringify({ return: msg.arguments?.id }) + '\n');
+          // Like the real agent: a stale reply left from an abandoned request, then the raw 0xFF
+          // delimiter in its own chunk, then the sync reply.
+          socket.write(JSON.stringify({ return: { stale: true } }) + '\n');
+          socket.write(Buffer.from([0xff]));
+          socket.write(JSON.stringify({ return: msg.arguments?.id }) + '\n');
         } else socket.write(JSON.stringify({ return: { ran: msg.execute } }) + '\n');
       }
     });

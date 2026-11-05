@@ -73,6 +73,9 @@ export class Qmp {
 
 // The QEMU guest agent speaks the same JSON framing without a greeting. guest-sync first
 // discards anything a previous, interrupted client left in the channel.
+// The guest agent keeps no session: replies to earlier, abandoned requests can still be queued.
+// guest-sync-delimited fixes that: the agent sends 0xFF and then a reply with our random id, and
+// everything before that reply is stale.
 export async function qga<T = unknown>(
   path: string,
   command: string,
@@ -80,7 +83,6 @@ export async function qga<T = unknown>(
 ): Promise<T> {
   if (!existsSync(path)) throw new Error('Guest agent socket missing; is the VM running?');
   const socket = connect(path);
-  socket.setEncoding('utf8');
   try {
     await new Promise<void>((resolve, reject) => {
       socket.once('connect', resolve);
@@ -88,35 +90,42 @@ export async function qga<T = unknown>(
     });
     const id = Math.floor(Math.random() * 1e9);
     let buffer = '';
-    const replies: QmpReply[] = [];
-    const wait = (count: number, timeoutMs: number) =>
-      new Promise<void>((resolve, reject) => {
-        const timer = setTimeout(() => {
-          reject(new Error(`guest agent did not answer ${command}`));
-        }, timeoutMs);
-        const onData = (chunk: string) => {
-          buffer += chunk;
-          let newline: number;
-          while ((newline = buffer.indexOf('\n')) >= 0) {
-            const line = buffer.slice(0, newline).replace(/^\xff/, '').trim();
-            buffer = buffer.slice(newline + 1);
-            if (line) replies.push(JSON.parse(line) as QmpReply);
+    let synced = false;
+    const reply = new Promise<QmpReply>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        reject(new Error(`guest agent did not answer ${command}`));
+      }, 30_000);
+      socket.on('data', (chunk: Buffer) => {
+        // 0xFF is the sync delimiter; it never occurs in UTF-8 JSON.
+        buffer += Buffer.from(chunk.filter((b) => b !== 0xff)).toString('utf8');
+        let newline: number;
+        while ((newline = buffer.indexOf('\n')) >= 0) {
+          const line = buffer.slice(0, newline).trim();
+          buffer = buffer.slice(newline + 1);
+          let parsed: QmpReply;
+          try {
+            parsed = JSON.parse(line) as QmpReply;
+          } catch {
+            continue;
           }
-          if (replies.length >= count) {
-            clearTimeout(timer);
-            socket.off('data', onData);
-            resolve();
+          if (!synced) {
+            if (parsed.return === id) {
+              synced = true;
+              socket.write(
+                JSON.stringify(args ? { execute: command, arguments: args } : { execute: command }) + '\n',
+              );
+            }
+            continue;
           }
-        };
-        socket.on('data', onData);
+          clearTimeout(timer);
+          resolve(parsed);
+        }
       });
+    });
     socket.write(JSON.stringify({ execute: 'guest-sync-delimited', arguments: { id } }) + '\n');
-    await wait(1, 5000);
-    socket.write(JSON.stringify(args ? { execute: command, arguments: args } : { execute: command }) + '\n');
-    await wait(2, 30_000);
-    const reply = replies[1]!;
-    if (reply.error) throw new Error(`guest agent ${command}: ${reply.error.desc}`);
-    return reply.return as T;
+    const result = await reply;
+    if (result.error) throw new Error(`guest agent ${command}: ${result.error.desc}`);
+    return result.return as T;
   } finally {
     socket.destroy();
   }

@@ -1,3 +1,4 @@
+import { spawn } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { request } from 'node:http';
 import { SSH_KEY, vmPaths, type VmConfig } from './state.js';
@@ -30,12 +31,38 @@ function sshOptions(vm: VmConfig): string[] {
 
 const target = (vm: VmConfig) => `${vm.user}@127.0.0.1`;
 
+const powershell = (script: string) =>
+  `powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand ${encodePowerShell(script)}`;
+
+// Windows PowerShell started with -EncodedCommand writes its error stream as CLIXML
+// ("#< CLIXML <Objs>...") whenever stderr is not a console. Turn it back into text.
+export function decodeClixml(stderr: string): string {
+  return stderr.replace(/#< CLIXML\r?\n(<Objs[\s\S]*?<\/Objs>)/g, (_, xml: string) =>
+    [...xml.matchAll(/<S S="(?:Error|Warning|warning|Verbose|Debug|Information)">([\s\S]*?)<\/S>/g)]
+      .map((m) => m[1] ?? '')
+      .join('')
+      .replace(/_x([0-9A-Fa-f]{4})_/g, (_m, hex: string) => String.fromCharCode(parseInt(hex, 16)))
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .replace(/&apos;/g, "'")
+      .replace(/&amp;/g, '&')
+      .replace(/\r\n/g, '\n'),
+  );
+}
+
 // Guest commands are PowerShell, sent base64-encoded as UTF-16LE so no quoting survives
 // three shells (local, sshd, cmd) by accident.
+// It ends in a newline so PowerShell errors quote the user's line, not the prelude.
+// The PATH refresh matters: sshd hands every session the environment it started with, so
+// without it a tool installed a minute ago (node, ffmpeg, your app) is "not recognized".
 export function encodePowerShell(script: string): string {
   const prelude =
-    "$ProgressPreference='SilentlyContinue';[Console]::OutputEncoding=[Text.Encoding]::UTF8;$OutputEncoding=[Text.Encoding]::UTF8;";
-  return Buffer.from(prelude + script, 'utf16le').toString('base64');
+    "$ProgressPreference='SilentlyContinue';[Console]::OutputEncoding=[Text.Encoding]::UTF8;$OutputEncoding=[Text.Encoding]::UTF8;" +
+    "$env:Path=[Environment]::GetEnvironmentVariable('Path','Machine')+';'+[Environment]::GetEnvironmentVariable('Path','User')\n";
+  // Like a shell: a failing last command makes the exit code, its own code if it was a program.
+  const epilogue = '\nif (-not $?) { exit $(if ($LASTEXITCODE) { $LASTEXITCODE } else { 1 }) }';
+  return Buffer.from(prelude + script + epilogue, 'utf16le').toString('base64');
 }
 
 // One long-lived master connection makes every later command ~20 ms instead of a full
@@ -93,33 +120,48 @@ export async function sshExec(
   { input }: { input?: string } = {},
 ): Promise<RunResult> {
   await ensureMaster(vm);
-  return run(
+  const result = await run(
     'ssh',
-    [
-      ...sshOptions(vm),
-      '-p',
-      String(vm.ports.ssh),
-      target(vm),
-      `powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand ${encodePowerShell(script)}`,
-    ],
-    { check: false, input },
+    [...sshOptions(vm), '-p', String(vm.ports.ssh), target(vm), powershell(script)],
+    {
+      check: false,
+      input,
+    },
   );
+  return { ...result, stderr: decodeClixml(result.stderr) };
 }
 
+// Streams stdout as it comes (for long installs); stderr is decoded and printed at the end.
 export async function sshExecInherit(vm: VmConfig, script: string): Promise<number> {
+  await ensureMaster(vm);
+  const child = spawn(
+    'ssh',
+    [...sshOptions(vm), '-p', String(vm.ports.ssh), target(vm), powershell(script)],
+    {
+      stdio: ['ignore', 'inherit', 'pipe'],
+    },
+  );
+  let stderr = '';
+  child.stderr.setEncoding('utf8').on('data', (chunk: string) => (stderr += chunk));
+  const code = await new Promise<number>((resolve) =>
+    child.on('close', (c) => {
+      resolve(c ?? 1);
+    }),
+  );
+  process.stderr.write(decodeClixml(stderr));
+  return code;
+}
+
+export async function sshShell(vm: VmConfig): Promise<number> {
   await ensureMaster(vm);
   return runInherit('ssh', [
     ...sshOptions(vm),
     '-p',
     String(vm.ports.ssh),
+    '-t',
     target(vm),
-    `powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand ${encodePowerShell(script)}`,
+    'powershell -NoLogo',
   ]);
-}
-
-export async function sshShell(vm: VmConfig): Promise<number> {
-  await ensureMaster(vm);
-  return runInherit('ssh', [...sshOptions(vm), '-p', String(vm.ports.ssh), '-t', target(vm)]);
 }
 
 // scp paths on Windows accept forward slashes; a drive letter needs a leading slash.

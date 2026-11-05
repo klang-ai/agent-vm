@@ -35,11 +35,13 @@ ID        TAG               VM SIZE                DATE        VM CLOCK     ICOU
 });
 
 describe('encodePowerShell', () => {
-  it('round-trips through UTF-16LE base64 with the prelude', () => {
-    const script = "Write-Output 'hej på dig'";
-    const decoded = Buffer.from(encodePowerShell(script), 'base64').toString('utf16le');
-    assert.ok(decoded.endsWith(script));
-    assert.ok(decoded.includes("ProgressPreference='SilentlyContinue'"));
+  it('round-trips through UTF-16LE base64, the script on its own line', () => {
+    const script = "Write-Output 'café ✓'";
+    const lines = Buffer.from(encodePowerShell(script), 'base64').toString('utf16le').split('\n');
+    assert.equal(lines.length, 3);
+    assert.match(lines[0] ?? '', /ProgressPreference='SilentlyContinue'.*\$env:Path=/);
+    assert.equal(lines[1], script);
+    assert.match(lines[2] ?? '', /^if \(-not \$\?\) \{ exit/);
   });
 });
 
@@ -100,5 +102,17 @@ describe('hasColour', () => {
     assert.equal(hasColour(ppm([200, 200, 200], 700)), false);
     assert.equal(hasColour(ppm([0, 120, 215], 700)), true);
     assert.equal(hasColour(Buffer.from('not a ppm')), false);
+  });
+});
+
+describe('decodeClixml', () => {
+  it('turns PowerShell CLIXML on stderr back into text', async () => {
+    const { decodeClixml } = await import('../guest.js');
+    const raw =
+      'native-err\r\n#< CLIXML\r\n<Objs Version="1.1.0.1" xmlns="http://schemas.microsoft.com/powershell/2004/04">' +
+      '<S S="Error">nosuchcmd : not recognized_x000D__x000A_</S><S S="Error">1&gt;&amp;2 : boom_x000D__x000A_</S>' +
+      '<Obj S="progress" RefId="0"><TN RefId="0"><T>System.Management.Automation.PSCustomObject</T></TN></Obj></Objs>';
+    assert.equal(decodeClixml(raw), 'native-err\r\nnosuchcmd : not recognized\n1>&2 : boom\n');
+    assert.equal(decodeClixml('plain error\n'), 'plain error\n');
   });
 });

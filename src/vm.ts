@@ -13,6 +13,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { fetchAsset, ASSETS } from './assets.js';
 import { ensureSinks, removeSinks } from './audio.js';
+import { createFromImage, hasImage, imageKey, saveImage } from './images.js';
 import { closeMaster, desktopHealth, push, sshExec, sshExecInherit, sshReachable } from './guest.js';
 import { pressKeys } from './input.js';
 import { isRunning, ovmfVars, qemuPid, startQemu } from './qemu.js';
@@ -34,6 +35,8 @@ export interface CreateOptions {
   locale: string;
   timeZone: string;
   tpm: boolean;
+  /** false: neither use nor save a cached base image */
+  cache: boolean;
 }
 
 const WANTED_DRIVERS = ['viostor', 'vioscsi', 'NetKVM', 'vioinput', 'vioserial', 'viorng', 'Balloon'];
@@ -192,13 +195,35 @@ export async function create(opts: CreateOptions): Promise<VmConfig> {
     iso,
     installed: false,
   };
+  // swtpm state is per VM and would not match a shared disk, so TPM VMs are never cached.
+  if (opts.cache && !opts.tpm) {
+    const inputs = {
+      iso,
+      locale: opts.locale,
+      timeZone: opts.timeZone,
+      productKey: opts.productKey,
+      diskGb: opts.diskGb,
+    };
+    vm.image = { key: imageKey(inputs), inputs };
+  }
   saveVm(vm);
   writeFileSync(p.agentdToken, randomBytes(24).toString('hex'), { mode: 0o600 });
+  // Built for cached VMs too: it stays attached, so drive letters match the image's.
+  await buildUnattendIso(vm, opts, virtioIso);
+
+  if (vm.image && hasImage(vm.image.key)) {
+    log(`Using the cached Windows install (image ${vm.image.key}); --no-cache installs from scratch`);
+    await createFromImage(vm, vm.image.key);
+    vm.baseImage = vm.image.key;
+    vm.installed = true;
+    saveVm(vm);
+    await finishFromImage(vm);
+    return vm;
+  }
 
   await run('qemu-img', ['create', '-q', '-f', 'qcow2', p.disk, `${vm.diskGb}G`]);
   await run('qemu-img', ['convert', '-f', 'raw', '-O', 'qcow2', ovmfVars(), p.efiVars]);
   if (vm.tpm) mkdirSync(p.tpmDir, { recursive: true });
-  await buildUnattendIso(vm, opts, virtioIso);
 
   await install(vm);
   return vm;
@@ -223,8 +248,43 @@ export async function install(vm: VmConfig) {
   await bootstrap(vm);
   vm.installed = true;
   saveVm(vm);
+  if (vm.image) {
+    log('Saving this install as a base image, so the next `create` takes a minute');
+    await shutdownGuest(vm);
+    await saveImage(vm);
+    await up(vm);
+  }
   await checkpointSave(vm, 'clean');
   log(`${vm.name} is ready. A checkpoint named 'clean' was saved.`);
+}
+
+// A VM on a cached image boots the already-bootstrapped system; it only needs its own agentd token.
+async function finishFromImage(vm: VmConfig) {
+  await ensureSinks(vm.name);
+  await startQemu(vm);
+  await waitFor('SSH', () => sshReachable(vm), { timeoutMs: 600_000, intervalMs: 3000 });
+  await push(vm, vmPaths(vm.name).agentdToken, 'C:/agent-vm/payload/');
+  await push(vm, join(GUEST_DIR, 'restart-agentd.ps1'), 'C:/agent-vm/');
+  // Set-Content keeps the ACL bootstrap put on the token file.
+  const result = await sshExec(
+    vm,
+    `Get-Content C:/agent-vm/payload/agentd.token -Raw | Set-Content C:/agent-vm/agentd.token -NoNewline
+& C:/agent-vm/restart-agentd.ps1`,
+  );
+  if (result.code !== 0) throw new UserError(`Could not set the agentd token: ${result.stderr.trim()}`);
+  await waitFor('agentd in the desktop session', async () => (await desktopHealth(vm)).ok, {
+    timeoutMs: 120_000,
+  });
+  await checkpointSave(vm, 'clean');
+  log(`${vm.name} is ready. A checkpoint named 'clean' was saved.`);
+}
+
+// Unlike `down`, this never falls back to killing QEMU: the disk is about to become a base
+// image and must be cleanly shut down.
+async function shutdownGuest(vm: VmConfig) {
+  await sshExec(vm, 'shutdown.exe /s /t 0 /f').catch(() => undefined);
+  await closeMaster(vm);
+  await waitFor('Windows shutdown', () => !isRunning(vm), { timeoutMs: 300_000, intervalMs: 1000 });
 }
 
 export async function bootstrap(vm: VmConfig) {
@@ -235,8 +295,10 @@ export async function bootstrap(vm: VmConfig) {
   const files = [
     await fetchAsset('node'),
     await fetchAsset('ffmpeg'),
+    await fetchAsset('vcRedist'),
     join(GUEST_DIR, 'agentd.mjs'),
     join(GUEST_DIR, 'bootstrap.ps1'),
+    join(GUEST_DIR, 'restart-agentd.ps1'),
     p.agentdToken,
   ];
   for (const file of files) await push(vm, file, `${payload}/`);
@@ -249,7 +311,10 @@ export async function bootstrap(vm: VmConfig) {
 
 export async function up(vm: VmConfig, { checkpoint }: { checkpoint?: string } = {}) {
   if (!vm.installed) {
-    throw new UserError(`${vm.name} never finished installing`, `Re-run: agent-vm install ${vm.name}`);
+    throw new UserError(
+      `${vm.name} never finished installing`,
+      `Resume it with: agent-vm install --vm ${vm.name}`,
+    );
   }
   await ensureSinks(vm.name);
   if (!isRunning(vm)) {

@@ -3,7 +3,8 @@ import { join } from 'node:path';
 import { CACHE } from './state.js';
 import { log, runInherit, UserError } from './util.js';
 
-// Pinned so a VM built today is reproducible; bump deliberately.
+// Pinned where upstream publishes versioned URLs, so a VM built today is reproducible; bump
+// deliberately. The Windows ISO, virtio-win and the VC++ runtime only have "latest" links.
 export const ASSETS = {
   windows11Eval: {
     file: 'Win11_24H2_Enterprise_Eval_x64_en-us.iso',
@@ -29,6 +30,12 @@ export const ASSETS = {
     file: 'ffmpeg-n8.1-latest-win64-gpl-8.1.zip',
     url: 'https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n8.1-latest-win64-gpl-8.1.zip',
     minBytes: 30_000_000,
+  },
+  // Many native tools (agent-desktop among them) need VCRUNTIME140.dll, which Windows lacks.
+  vcRedist: {
+    file: 'vc_redist.x64.exe',
+    url: 'https://aka.ms/vs/17/release/vc_redist.x64.exe',
+    minBytes: 10_000_000,
   },
 } as const;
 

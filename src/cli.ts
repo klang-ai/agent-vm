@@ -11,6 +11,7 @@ import { isRunning } from './qemu.js';
 import { withQmp } from './qmp.js';
 import { listVms, loadVm, resolveVmName, vmPaths, type VmConfig } from './state.js';
 import { psQuote, UserError, which } from './util.js';
+import { deleteImage, listImages, saveImage } from './images.js';
 import { installSkill, listSkills, readSkill, skillPath, type SkillTarget } from './skills.js';
 import * as vms from './vm.js';
 
@@ -94,6 +95,7 @@ interface CreateFlags {
   locale: string;
   timeZone: string;
   tpm: boolean;
+  cache: boolean;
 }
 
 const psArgs = (args: string[]) => (args.length ? `@(${args.map(psQuote).join(',')})` : '@()');
@@ -120,7 +122,8 @@ program
   .option('--product-key <key>', 'product key, needed for multi-edition retail ISOs')
   .option('--locale <locale>', 'Windows display language and locale', 'en-US')
   .option('--time-zone <tz>', 'Windows time zone id', 'UTC')
-  .option('--tpm', 'attach a software TPM 2.0 (swtpm)', false)
+  .option('--tpm', 'attach a software TPM 2.0 (swtpm); such VMs are never cached', false)
+  .option('--no-cache', 'install from the ISO even if a cached install exists, and do not cache this one')
   .action(async (name: string, o: CreateFlags) => {
     const vm = await vms.create({
       name,
@@ -133,6 +136,7 @@ program
       locale: o.locale,
       timeZone: o.timeZone,
       tpm: o.tpm,
+      cache: o.cache,
     });
     print(await vms.status(vm), `${vm.name} created`);
   });
@@ -421,6 +425,42 @@ program
   });
 
 program.commandsGroup('Checkpoints:');
+
+const image = program
+  .command('image')
+  .description('Cached Windows installs that make `create` take a minute instead of half an hour')
+  .addHelpText('after', examples('image list', 'image save', 'image delete 3f2a9c0d1e4b5a6c'));
+image
+  .command('list')
+  .description('List cached installs and the VMs built on them')
+  .action(() => {
+    const images = listImages();
+    print(
+      images,
+      images
+        .map(
+          (i) =>
+            `${i.key}  ${i.locale}  ${i.diskGb} GB  from ${i.fromVm}  used by: ${i.usedBy.join(', ') || '-'}`,
+        )
+        .join('\n') || 'No cached installs. The first `agent-vm create` makes one.',
+    );
+  });
+image
+  .command('save')
+  .description("Save the VM's current disk as the cached install for future creates (VM must be stopped)")
+  .action(async () => {
+    const vm = currentVm();
+    if (isRunning(vm)) throw new UserError(`${vm.name} is running`, 'Stop it first: agent-vm down');
+    const key = await saveImage(vm);
+    print({ key }, `saved image ${key}`);
+  });
+image
+  .command('delete')
+  .description('Delete a cached install (refused while a VM is built on it)')
+  .argument('<key>')
+  .action((key: string) => {
+    deleteImage(key);
+  });
 
 const checkpoint = program
   .command('checkpoint')

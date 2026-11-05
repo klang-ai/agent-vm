@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { extname, join } from 'node:path';
 import { CACHE } from './state.js';
@@ -130,23 +130,52 @@ export async function sayIntoMic(vm: string, text: string, opts: { lang?: string
   }
 }
 
+const SPEAKER_RATE = 48_000;
+
+// parec streams raw samples, so the recording is exactly `seconds` long. (parecord loses its
+// start-up and the buffered tail when interrupted.)
 export async function recordSpeaker(vm: string, out: string, seconds: number) {
   await ensureSinks(vm);
-  await new Promise<void>((resolve, reject) => {
-    const child = spawn('parecord', [
+  const wanted = Math.round(seconds * SPEAKER_RATE) * 2;
+  const pcm = await new Promise<Buffer>((resolve, reject) => {
+    const child = spawn('parec', [
       '-d',
       `${speakerSinkName(vm)}.monitor`,
-      '--file-format=wav',
-      '--rate=48000',
+      '--format=s16le',
+      `--rate=${SPEAKER_RATE}`,
       '--channels=1',
-      out,
+      '--latency-msec=20',
     ]);
+    const chunks: Buffer[] = [];
+    let size = 0;
+    child.stdout.on('data', (chunk: Buffer) => {
+      chunks.push(chunk);
+      size += chunk.length;
+      if (size >= wanted) child.kill();
+    });
     child.on('error', reject);
     child.on('close', () => {
-      resolve();
+      resolve(Buffer.concat(chunks).subarray(0, wanted));
     });
-    setTimeout(() => child.kill('SIGINT'), seconds * 1000);
   });
+  writeFileSync(out, Buffer.concat([wavHeader(pcm.length, SPEAKER_RATE), pcm]));
+}
+
+export function wavHeader(dataBytes: number, rate: number): Buffer {
+  const h = Buffer.alloc(44);
+  h.write('RIFF', 0);
+  h.writeUInt32LE(36 + dataBytes, 4);
+  h.write('WAVEfmt ', 8);
+  h.writeUInt32LE(16, 16);
+  h.writeUInt16LE(1, 20); // PCM
+  h.writeUInt16LE(1, 22); // mono
+  h.writeUInt32LE(rate, 24);
+  h.writeUInt32LE(rate * 2, 28);
+  h.writeUInt16LE(2, 32);
+  h.writeUInt16LE(16, 34);
+  h.write('data', 36);
+  h.writeUInt32LE(dataBytes, 40);
+  return h;
 }
 
 export interface Level {

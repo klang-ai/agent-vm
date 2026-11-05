@@ -10,11 +10,15 @@ const PORT = Number(process.env.AGENT_VM_AGENTD_PORT ?? 7777);
 const TOKEN = readFileSync('C:\\agent-vm\\agentd.token', 'utf8').trim();
 const MAX_OUTPUT = 32 * 1024 * 1024;
 
+// Same wrapping as `agent-vm exec` over SSH (src/guest.ts): fresh PATH, and the exit code of a
+// failing last command.
 const prelude =
-  "$ProgressPreference='SilentlyContinue';[Console]::OutputEncoding=[Text.Encoding]::UTF8;$OutputEncoding=[Text.Encoding]::UTF8;";
+  "$ProgressPreference='SilentlyContinue';[Console]::OutputEncoding=[Text.Encoding]::UTF8;$OutputEncoding=[Text.Encoding]::UTF8;" +
+  "$env:Path=[Environment]::GetEnvironmentVariable('Path','Machine')+';'+[Environment]::GetEnvironmentVariable('Path','User')\n";
+const epilogue = '\nif (-not $?) { exit $(if ($LASTEXITCODE) { $LASTEXITCODE } else { 1 }) }';
 
 function encode(script) {
-  return Buffer.from(prelude + script, 'utf16le').toString('base64');
+  return Buffer.from(prelude + script + epilogue, 'utf16le').toString('base64');
 }
 
 function exec({ script, timeoutMs = 120_000, detach = false, env = {} }) {
@@ -28,9 +32,14 @@ function exec({ script, timeoutMs = 120_000, detach = false, env = {} }) {
   ];
   const options = { env: { ...process.env, ...env }, windowsHide: true };
   if (detach) {
-    const child = spawn('powershell.exe', args, { ...options, detached: true, stdio: 'ignore' });
-    child.unref();
-    return Promise.resolve({ code: 0, stdout: '', stderr: '', pid: child.pid });
+    // A detached Node child has no console and Windows PowerShell dies before running anything.
+    // Let PowerShell start the job instead, hidden, and report its pid.
+    const list = args.map((a) => `'${a}'`).join(',');
+    return exec({
+      script: `(Start-Process powershell.exe -WindowStyle Hidden -PassThru -ArgumentList ${list}).Id`,
+      timeoutMs: 30_000,
+      env,
+    }).then((r) => ({ ...r, pid: Number(r.stdout.trim()) || undefined }));
   }
   return new Promise((resolve) => {
     const child = spawn('powershell.exe', args, options);

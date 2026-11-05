@@ -67,3 +67,14 @@ describe('sink names', () => {
     assert.equal(speakerSinkName('my vm.2'), 'agentvm_my_vm_2_speaker');
   });
 });
+
+describe('wavHeader', () => {
+  it('writes a WAV that wavLevel reads back', async () => {
+    const { wavHeader, wavLevel } = await import('../audio.js');
+    const pcm = Buffer.alloc(48_000 * 2);
+    for (let i = 0; i < 48_000; i++) pcm.writeInt16LE(Math.round(Math.sin(i / 10) * 8000), i * 2);
+    const level = wavLevel(Buffer.concat([wavHeader(pcm.length, 48_000), pcm]));
+    assert.equal(level.durationSec, 1);
+    assert.equal(level.silent, false);
+  });
+});
