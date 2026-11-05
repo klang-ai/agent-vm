@@ -44,7 +44,7 @@ $ agent-vm checkpoint restore clean        # seconds
 $ agent-vm install-app ./MyApp-setup.exe
 $ agent-vm launch 'C:\Users\agent\AppData\Local\MyApp\MyApp.exe'
 $ agent-vm ui snapshot -i                  # UI Automation tree with @refs
-$ agent-vm mic say --lang sv "hej, det här är ett test"
+$ agent-vm mic say "hello, this is a test"
 $ agent-vm ui get text @e4
 $ agent-vm screenshot after.png
 ```

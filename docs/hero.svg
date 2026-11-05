@@ -69,7 +69,7 @@
         <rect x="680" y="208" width="240" height="10" rx="5" fill="#E2E8F0"/>
         <rect x="680" y="228" width="210" height="10" rx="5" fill="#E2E8F0"/>
         <rect x="676" y="252" width="268" height="40" rx="8" fill="#FFFFFF" stroke="#3B82F6" stroke-width="2"/>
-        <text x="690" y="277" fill="#0F172A" font-family="'Segoe UI', Inter, system-ui, 'DejaVu Sans', sans-serif" font-size="13">“Hej, det här är ett test”</text>
+        <text x="690" y="277" fill="#0F172A" font-family="'Segoe UI', Inter, system-ui, 'DejaVu Sans', sans-serif" font-size="13">“Hello, this is a test”</text>
         <rect x="864" y="302" width="80" height="26" rx="6" fill="#2563EB"/>
         <text x="904" y="319" fill="#FFFFFF" font-family="'Segoe UI', Inter, system-ui, 'DejaVu Sans', sans-serif" font-size="12" text-anchor="middle" font-weight="600">Save</text>
         <!-- UIA ref badges -->
@@ -114,9 +114,9 @@
       <text x="92" y="260"><tspan fill="#A78BFA">❯</tspan><tspan fill="#E2E8F0"> agent-vm checkpoint restore </tspan><tspan fill="#FBBF24">clean</tspan></text>
       <text x="92" y="284" fill="#34D399">  ✔ restored 'clean' in 6.1s</text>
       <text x="92" y="314"><tspan fill="#A78BFA">❯</tspan><tspan fill="#E2E8F0"> agent-vm install-app </tspan><tspan fill="#93C5FD">YourApp-setup.exe</tspan></text>
-      <text x="92" y="344"><tspan fill="#A78BFA">❯</tspan><tspan fill="#E2E8F0"> agent-vm mic say </tspan><tspan fill="#F9A8D4">"hej, det här är ett test"</tspan></text>
+      <text x="92" y="344"><tspan fill="#A78BFA">❯</tspan><tspan fill="#E2E8F0"> agent-vm mic say </tspan><tspan fill="#F9A8D4">"hello, this is a test"</tspan></text>
       <text x="92" y="374"><tspan fill="#A78BFA">❯</tspan><tspan fill="#E2E8F0"> agent-vm ui snapshot -i</tspan></text>
-      <text x="92" y="398" fill="#94A3B8">  textbox <tspan fill="#F472B6">@e4</tspan> "hej, det här är ett test"</text>
+      <text x="92" y="398" fill="#94A3B8">  textbox <tspan fill="#F472B6">@e4</tspan> "hello, this is a test"</text>
       <text x="92" y="420" fill="#94A3B8">  button  <tspan fill="#22D3EE">@e7</tspan> "Save"</text>
       <text x="92" y="450"><tspan fill="#A78BFA">❯</tspan><tspan fill="#E2E8F0"> agent-vm ui click </tspan><tspan fill="#22D3EE">@e7</tspan><tspan fill="#E2E8F0"> </tspan><tspan fill="#E2E8F0" opacity="0.9">▌</tspan></text>
     </g>
