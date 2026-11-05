@@ -49,6 +49,8 @@ through the guest's exit code.
   `exec --desktop --detach 'ffmpeg -y -f dshow -i audio="Microphone (High Definition Audio Device)" -t 8 C:/agent-vm/heard.wav'`.
 - **Checkpoints are cheap.** Save one after slow setup (`checkpoint save app-installed`) and
   restore it instead of redoing the setup. Don't overwrite `clean`.
+- **Apps with several web views** (Tauri and Electron apps often have hidden overlay windows):
+  `web tab list`, then `web tab t2` to pick the main one before `web snapshot -i`.
 - **Local dev servers:** `hosts <name…>` points names at the host (10.0.2.2), and `trust-ca <pem>`
   trusts a dev CA.
 - When something is stuck, take a `screenshot` before anything else. A modal dialog (UAC,
