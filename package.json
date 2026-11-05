@@ -1,6 +1,6 @@
 {
   "name": "@klang-ai/agent-vm",
-  "version": "0.1.0",
+  "version": "0.1.0-alpha.0",
   "description": "Let AI agents drive a real Windows desktop in a local VM: lifecycle, checkpoints, shell, UI automation, and a fake microphone.",
   "license": "Apache-2.0",
   "type": "module",
