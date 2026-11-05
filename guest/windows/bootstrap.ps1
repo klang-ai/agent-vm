@@ -59,7 +59,8 @@ Step 'agent-desktop'
 Invoke-Native { npm config set prefix 'C:\agent-vm\npm' --location=global } | Out-Null
 Add-MachinePath 'C:\agent-vm\npm'
 # Its postinstall downloads the native binary; npm 11 wants global install scripts allowed by name.
-Invoke-Native { npm install -g "agent-desktop@$AgentDesktopVersion" --allow-scripts=agent-desktop --no-fund --no-audit } | Out-Null
+$agentDesktop = "agent-desktop@$AgentDesktopVersion"
+Invoke-Native { npm install -g $agentDesktop --allow-scripts=agent-desktop --no-fund --no-audit } | Out-Null
 Invoke-Native { & 'C:\agent-vm\npm\agent-desktop.cmd' version }
 
 Step 'agentd (desktop-session daemon)'
