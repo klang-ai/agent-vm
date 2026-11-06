@@ -24,6 +24,8 @@ describe('parseCombo', () => {
     assert.deepEqual(parseCombo('Win+R'), ['meta_l', 'r']);
     assert.deepEqual(parseCombo('enter'), ['ret']);
     assert.deepEqual(parseCombo('f12'), ['f12']);
+    assert.deepEqual(parseCombo('ctrl+shift+,'), ['ctrl', 'shift', 'comma']);
+    assert.deepEqual(parseCombo('ctrl+bracket_left'), ['ctrl', 'bracket_left']);
   });
 
   it('rejects unknown keys', () => {

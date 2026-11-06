@@ -92,6 +92,8 @@ export function parseCombo(combo: string): string[] {
     .map((part) => {
       const key = part.trim();
       if (KEY_ALIASES[key]) return KEY_ALIASES[key];
+      if (PLAIN[key] && key.trim()) return PLAIN[key];
+      if (Object.values(PLAIN).includes(key)) return key;
       if (/^f([1-9]|1[0-2])$/.test(key) || /^[a-z0-9]$/.test(key)) return key;
       throw new UserError(`Unknown key '${part}'`);
     });
